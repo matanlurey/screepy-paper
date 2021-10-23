@@ -16,12 +16,16 @@ import path from 'path';
     });
   };
 
+  const resolveModuleName = (name) => {
+    const key = path.basename(name);
+    return key.substring(0, key.length - '.ts'.length);
+  };
+
   const getModules = async () => {
     const modules = {};
     for (const name of await fs.readdir('dist')) {
-      const key = path.basename(name).split('.')[0];
       const value = await fs.readFile(`dist/${name}`, 'utf-8');
-      modules[key] = transformForScreepsCompat(value);
+      modules[resolveModuleName(name)] = transformForScreepsCompat(value);
     }
     return modules;
   };
