@@ -7,27 +7,31 @@ import path from 'path';
 
 (async () => {
   const args = minimist(process.argv.slice(2));
-  const branch = args.branch || 'default';
   const watch = args.watch || false;
   const upload = args.upload;
+
+  const transformForScreepsCompat = (input) => {
+    return input.replaceAll(/require\(\".\/(\w+)\.js\"\)/g, (_, match) => {
+      return `require(\"${match}\")`;
+    });
+  };
 
   const getModules = async () => {
     const modules = {};
     for (const name of await fs.readdir('dist')) {
       const key = path.basename(name).split('.')[0];
-      modules[key] = await fs.readFile(`dist/${name}`, 'utf-8');
+      const value = await fs.readFile(`dist/${name}`, 'utf-8');
+      modules[key] = transformForScreepsCompat(value);
     }
     return modules;
   };
-
-  const modules = await getModules();
 
   const onRebuild = async () => {
     const configs = await fs.readJson('screepy.json');
     const results = await fetch('https://screeps.com/api/user/code', {
       body: JSON.stringify({
-        branch,
-        modules,
+        branch: typeof upload === 'string' ? upload : 'default',
+        modules: await getModules(),
       }),
       method: 'POST',
       headers: {
