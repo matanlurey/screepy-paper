@@ -1,0 +1,19 @@
+{
+  "parser": "@typescript-eslint/parser",
+  "overrideConfig": {
+    "parserOptions": {
+      "extraFileExtensions": [".json"],
+      "sourceType": "module",
+      "project": "./tsconfig.json"
+    }
+  },
+  "env": {
+    "node": true
+  },
+  "extends": [
+    "plugin:json/recommended",
+    "plugin:@typescript-eslint/recommended",
+    "prettier"
+  ],
+  "plugins": ["import", "prettier", "@typescript-eslint"]
+}
