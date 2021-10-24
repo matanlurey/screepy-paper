@@ -11,7 +11,7 @@ import path from 'path';
   const upload = args.upload;
 
   const transformForScreepsCompat = (input) => {
-    return input.replaceAll(/require\(\".\/(\w+)\.js\"\)/g, (_, match) => {
+    return input.replaceAll(/require\(\".\/((\w|\.)+)\.js\"\)/g, (_, match) => {
       return `require(\"${match}\")`;
     });
   };
