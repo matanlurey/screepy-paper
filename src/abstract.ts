@@ -2,7 +2,7 @@
  * Typed memory access for an object.
  */
 export interface TypedMemory<T> {
-  readonly role: T;
+  readonly role?: T;
 }
 
 /**
@@ -10,10 +10,13 @@ export interface TypedMemory<T> {
  */
 export abstract class AbstractScreepy<
   O extends { memory: CreepMemory | SpawnMemory | RoomMemory },
-  R,
-  M extends TypedMemory<R>,
+  R = typeof undefined,
+  M extends TypedMemory<R> = {},
 > {
-  protected constructor(protected readonly object: O, role: R) {
+  protected constructor(
+    protected readonly object: O,
+    private readonly role: R,
+  ) {
     if (this.memory.role !== role) {
       throw new Error(
         `${this}: Expected "${role}"", got "${this.memory.role}"`,
@@ -26,6 +29,13 @@ export abstract class AbstractScreepy<
    */
   protected get memory(): M {
     return this.object.memory as M;
+  }
+
+  /**
+   * Sets the memory for this object.
+   */
+  protected set memory(memory: M) {
+    this.object.memory = memory;
   }
 
   /** Runs scripts associated with this object. */
@@ -83,7 +93,7 @@ export abstract class AbstractCreepScreepy<
    * @param resource
    * @returns
    */
-  protected hasFullCapacity(resource: ResourceConstant): boolean {
+  hasFullCapacity(resource: ResourceConstant): boolean {
     return this.object.store.getFreeCapacity(resource) === 0;
   }
 
@@ -92,7 +102,7 @@ export abstract class AbstractCreepScreepy<
    * @param resource
    * @returns
    */
-  protected hasEmptyCapacity(resource: ResourceConstant): boolean {
+  hasEmptyCapacity(resource: ResourceConstant): boolean {
     return this.object.store.getUsedCapacity(resource) === 0;
   }
 
@@ -112,8 +122,8 @@ export abstract class AbstractCreepScreepy<
     }) as StructureContainer[] | StructureSpawn[];
     containers.sort((a, b) => {
       return (
-        a.store.getUsedCapacity(RESOURCE_ENERGY) -
-        b.store.getUsedCapacity(RESOURCE_ENERGY)
+        (a.store.getUsedCapacity(resource) || 0) -
+        (b.store.getUsedCapacity(resource) || 0)
       );
     });
     return containers[0];

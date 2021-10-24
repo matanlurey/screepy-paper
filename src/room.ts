@@ -1,28 +1,13 @@
-import lodash from 'lodash';
 import { AbstractScreepy } from './abstract.js';
-import { Ghoul } from './ghoul.js';
+import { Ghoul, GhoulMemory } from './ghoul.js';
+import { UUIDGenerator } from './utils.js';
 
 /**
- * Known role types for rooms to prioritize.
- */
-type RoomRoles = undefined;
-
-/**
- * Screepy wrapper around a {@link Room} object.
+ * Screepy wrapper around a {@link Room}.
  *
- * Currently a room is basic coordinator script between various creeps.
- *
- * A room will attempt to (WIP):
- * - Have 2 ghouls harvest from a nearby source into structures with capacity.
- * - Have 2 ghouls upgrade the room controller.
+ * Currently a room is a basic coordinator script between various creeps.
  */
-export default class ScreepyRoom extends AbstractScreepy<
-  Room,
-  RoomRoles,
-  {
-    role: RoomRoles;
-  }
-> {
+export default class ScreepyRoom extends AbstractScreepy<Room> {
   /**
    * Assigns the provided room as a {@link ScreepyRoom} and returns it.
    *
@@ -43,119 +28,191 @@ export default class ScreepyRoom extends AbstractScreepy<
     return true;
   }
 
-  private readonly config = {
-    maxHarvestersPerSpawner: 3,
-    maxUpgradersPerSpawner: 2,
-  };
-
-  constructor(room: Room) {
+  /**
+   * Creates and wraps a room object.
+   *
+   * @param room Room to wrap.
+   * @param uuid UUID generator.
+   */
+  constructor(room: Room, private readonly uuid = new UUIDGenerator()) {
     super(room, undefined);
   }
 
   override run(): void {
-    // Run ghouls.
-    let harvesting = 0;
-    let upgrading = 0;
-    Object.values(Game.creeps).forEach((c) => {
-      if (Ghoul.isA(c)) {
-        const ghoul = new Ghoul(c);
-        if (ghoul.isHarvesting) {
-          harvesting++;
-        } else if (ghoul.isUpgrading) {
-          upgrading++;
-        }
-        ghoul.run();
-      }
-    });
+    this.optimizeHarvesting();
+    this.optimizeUpgrading();
+  }
 
-    // Finally, spawn more ghouls.
-    const spawner = this.getDefaultSpawner();
-    if (!spawner) {
-      console.log(`No spawner detected in room: "${this.object.name}""`);
+  /**
+   * Runs subroutines for harvesting.
+   */
+  private optimizeHarvesting(): void {
+    const harvesters = this.findHarvesters();
+
+    // Increase the harvesting pool if necessary.
+    if (harvesters.length < this.determineMaximumHarvesters()) {
+      this.increaseHarvesters();
+    }
+
+    // Change orders if necessary.
+    harvesters.forEach((g) => this.orderHarvester(g));
+
+    // Run internal scripting once received an order.
+    harvesters.forEach((g) => g.run());
+  }
+
+  /**
+   * Runs subroutines for upgrading.
+   */
+  private optimizeUpgrading(): void {
+    const upgraders = this.findUpgraders();
+
+    // Increase the upgrading pool if necessary.
+    if (this.findSpawner()?.store.getFreeCapacity(RESOURCE_ENERGY) === 0) {
+      this.increaseUpgraders();
+    }
+
+    // Change orders if necessary.
+    upgraders.forEach((g) => this.orderUpgrader(g));
+
+    // Run internal scripting once received an order.
+    upgraders.forEach((g) => g.run());
+  }
+
+  private orderHarvester(ghoul: Ghoul): void {
+    if (ghoul.hasEmptyCapacity(RESOURCE_ENERGY)) {
+      const source = this.findSourceClosestToSpawner();
+      if (source) {
+        ghoul.orderToHarvest(source);
+      }
+    } else if (ghoul.hasFullCapacity(RESOURCE_ENERGY)) {
+      const spawner = this.findSpawner();
+      if (spawner) {
+        ghoul.orderToTransfer(spawner);
+      }
+    } else {
+      // Do not change the goal (continue doing what you're doing).
+    }
+  }
+
+  private orderUpgrader(ghoul: Ghoul): void {
+    if (ghoul.hasEmptyCapacity(RESOURCE_ENERGY)) {
+      const spawner = this.findSpawner();
+      if (spawner) {
+        ghoul.orderToTransfer(spawner);
+      }
+    } else if (ghoul.hasFullCapacity(RESOURCE_ENERGY)) {
+      const source = this.findSourceClosestToSpawner();
+      if (source) {
+        ghoul.orderToUpgrade();
+      }
+    } else {
+      // Do not change the goal (continue doing what you're doing).
+    }
+  }
+
+  /**
+   * Increases the number of harvesters for a provided source.
+   *
+   * @param source Target source. Defaults to the one closest to the spawner.
+   */
+  private increaseHarvesters(source = this.findSourceClosestToSpawner()): void {
+    if (!source) {
       return;
     }
-    if (spawner.spawning) {
-      this.object.visual.text(
-        `Spawning: ${spawner.spawning.name}`,
-        spawner.pos.x,
-        spawner.pos.y + 1.1,
-        {
-          font: 0.3,
-          stroke: '#222',
-        },
-      );
-      return;
+    const memory: GhoulMemory = {
+      harvest: source.id,
+      role: 'ghoul',
+    };
+    this.findSpawner()?.spawnCreep(
+      [WORK, CARRY, MOVE],
+      this.uuid.next('Ghoul'),
+      {
+        memory,
+      },
+    );
+  }
+
+  /**
+   * Increases the number of upgraders for the room controller.
+   */
+  private increaseUpgraders(): void {
+    const memory: GhoulMemory = {
+      role: 'ghoul',
+    };
+    this.findSpawner()?.spawnCreep(
+      [WORK, CARRY, MOVE],
+      this.uuid.next('Ghoul'),
+      {
+        memory,
+      },
+    );
+  }
+
+  /**
+   * Returns the current number of harvesters.
+   *
+   * @return Number of harvesters.
+   */
+  private findHarvesters(): Ghoul[] {
+    return this.object
+      .find(FIND_MY_CREEPS, {
+        filter: (c) => Ghoul.isA(c),
+      })
+      .map((c) => new Ghoul(c))
+      .filter((c) => c.isHarvesting);
+  }
+
+  /**
+   * Returns the current number of upgraders.
+   *
+   * @return Number of upgraders.
+   */
+  private findUpgraders(): Ghoul[] {
+    return this.object
+      .find(FIND_MY_CREEPS, {
+        filter: (c) => Ghoul.isA(c),
+      })
+      .map((c) => new Ghoul(c))
+      .filter((c) => !c.isHarvesting);
+  }
+
+  /**
+   * Returns the maximum number of effective harvesters.
+   *
+   * This number is computed based on open terrain squares near the **closest**
+   * {@link Source}.
+   *
+   * @param source Source to check, otherwise defaults to the first spawner.
+   *
+   * @return Number of harvesters.
+   */
+  private determineMaximumHarvesters(
+    source = this.findSourceClosestToSpawner(),
+  ): number {
+    if (!source) {
+      return 0;
     }
-    if (harvesting < this.config.maxHarvestersPerSpawner) {
-      // Create a new harvesting ghoul.
-      this.createHarvestingGhoul(spawner);
-    } else if (upgrading < this.config.maxUpgradersPerSpawner) {
-      // Create a new upgrading ghoul.
-      this.createUpgradingGhoul(spawner);
-    } else {
-      // Report the spawner as idle.
-      this.object.visual.text(`Idle`, spawner.pos.x, spawner.pos.y + 1.1, {
-        font: 0.3,
-        stroke: '#222',
-      });
-    }
+    // TODO: Consider more or less based on distance.
+    return 2;
   }
 
-  private getDefaultSpawner(): StructureSpawn | undefined {
-    return lodash.sample(Game.spawns);
+  /**
+   * Returns the source closest to the spawner in the room, if any.
+   *
+   * @returns Source, or [[null]] if there is none.
+   */
+  private findSourceClosestToSpawner(): Source | null {
+    const spawner = this.findSpawner();
+    return spawner?.pos.findClosestByPath(FIND_SOURCES_ACTIVE) || null;
   }
 
-  private getNextId(spawner: StructureSpawn): number {
-    const memory = spawner.memory as { [key: string]: unknown };
-    const nextId = (memory.nextId || 1) as number;
-    return nextId;
-  }
-
-  private incrementId(spawner: StructureSpawn): void {
-    const memory = spawner.memory as { [key: string]: unknown };
-    const nextId = (memory.nextId || 1) as number;
-    memory.nextId = nextId + 1;
-  }
-
-  private createHarvestingGhoul(spawner: StructureSpawn): void {
-    const harvest = this.object.find(FIND_SOURCES)[0];
-    if (harvest) {
-      const name = `Ghoul #${this.getNextId(spawner)}`;
-      if (
-        spawner.spawnCreep([WORK, CARRY, MOVE], name, {
-          memory: {
-            role: 'ghoul',
-            harvest: harvest.id,
-          },
-        }) === OK
-      ) {
-        this.incrementId(spawner);
-      }
-    } else {
-      console.log(`No source detected in room: "${this.object.name}"`);
-    }
-  }
-
-  private createUpgradingGhoul(spawner: StructureSpawn): void {
-    const controller = this.object.controller;
-    if (controller) {
-      const name = `Ghoul #${this.getNextId(spawner)}`;
-      if (
-        spawner.spawnCreep([WORK, CARRY, MOVE], name, {
-          memory: {
-            role: 'ghoul',
-            goal: 'withdraw',
-          },
-        }) === OK
-      ) {
-        this.incrementId(spawner);
-      }
-    } else {
-      console.log(`No controller detected in room: "${this.object.name}"`);
-    }
-  }
-
-  override toString(): string {
-    return `<Room|${this.object.name}>`;
+  /**
+   * Returns the current spawner in the room, if any.
+   *
+   * @return Spawner, or [[null]] if there is none.
+   */
+  private findSpawner(): StructureSpawn | null {
+    return this.object.find(FIND_MY_SPAWNS)[0];
   }
 }

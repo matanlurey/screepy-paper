@@ -1,24 +1,27 @@
-import { AbstractCreepScreepy, TypedCreepMemory } from './abstract.js';
+import { AbstractCreepScreepy, TypedMemory } from './abstract.js';
 
 const role = 'ghoul';
 
 /**
- * Typed memory for a {@see Ghoul}.
+ * Typed memory for a {@link Ghoul}.
  */
-interface GhoulMemory extends TypedCreepMemory<typeof role> {
+export interface GhoulMemory extends TypedMemory<typeof role> {
   /**
-   * What location the ghoul should be harvesting from.
+   * What object the ghoul should be harvesting from.
    *
-   * Currently this is assumed to be the ID of a Source.
-   *
-   * If omitted, the ghoul is assumed to be an upgrading the room controller.
+   * If omitted, the ghoul's objective is not to be harvesting.
    */
-  readonly harvest?: string;
+  readonly harvest?: Id<Source>;
 
   /**
-   * What the goal of this ghoul is, if any.
+   * What object the ghoul should be transferring into or withdrawing from.
    */
-  goal?: 'deposit' | 'upgrade';
+  readonly transfer?: Id<Structure>;
+
+  /**
+   * Required.
+   */
+  readonly role: typeof role;
 }
 
 /**
@@ -49,9 +52,9 @@ export class Ghoul extends AbstractCreepScreepy<typeof role, GhoulMemory> {
   }
 
   /**
-   * Creates a default implementation of the memory for a {@link Ghoul}.
+   * Creates and returns a default implementation of memory for a ghoul.
    *
-   * @return New instance of memory.
+   * @returns New memory instance.
    */
   private static createMemory(): GhoulMemory {
     return {
@@ -63,164 +66,117 @@ export class Ghoul extends AbstractCreepScreepy<typeof role, GhoulMemory> {
     super(creep, role);
   }
 
-  /**
-   * Whether this ghoul is harvesting from a source.
-   */
-  get isHarvesting(): boolean {
-    return !!this.memory.harvest;
-  }
-
-  /**
-   * Whether this goal is upgrading the room controller.
-   */
-  get isUpgrading(): boolean {
-    return !this.memory.harvest;
-  }
-
   override run(): void {
-    if (this.memory.harvest) {
-      this.runHarvest();
+    if (this.isHarvesting) {
+      this.runHarvest(this.memory.harvest!);
     } else {
       this.runUpgrade();
     }
   }
 
   /**
-   * Produces a small label describing the unit's current action.
-   *
-   * Should be the last command used.
-   *
-   * @param label
+   * Whether this ghoul's current objective is harvesting.
    */
-  protected override label(label?: string): void {
-    super.label('Ghoul', label, '👻');
+  get isHarvesting(): Boolean {
+    return !!this.memory.harvest;
   }
 
   /**
-   * Runs the Ghoul with a role of upgrading the room controller.
+   * Sets the objective of this ghoul to harvest from a nearby source.
    */
-  private runUpgrade(): void {
-    const creep = this.object;
-
-    // Potentially switch tasks based on current state.
-    if (this.hasFullCapacity(RESOURCE_ENERGY)) {
-      creep.say('Upgrade');
-      this.memory.goal = 'upgrade';
-    } else if (this.hasEmptyCapacity(RESOURCE_ENERGY)) {
-      creep.say('Withdraw');
-      delete this.memory.goal;
-    }
-
-    // Run task.
-    switch (this.memory.goal) {
-      case 'upgrade':
-        return this.runUpgradeGoal();
-      default:
-        const container = this.findContainerWithCapacity(RESOURCE_ENERGY);
-        if (!container) {
-          console.log(`"${creep.name}" lost the will to live (no containers)"`);
-          creep.suicide();
-          return;
-        }
-        return this.runWithdrawGoal(container);
-    }
+  orderToHarvest(source: Source): void {
+    this.memory = {
+      harvest: source.id,
+      role: 'ghoul',
+    };
   }
 
   /**
-   * Moves to and upgrades the room controller.
+   * Sets the objective of this ghoul to upgrade the room controller.
    */
-  private runUpgradeGoal(): void {
-    const creep = this.object;
-    if (
-      creep.transfer(creep.room.controller!, RESOURCE_ENERGY) ===
-      ERR_NOT_IN_RANGE
-    ) {
-      creep.moveTo(creep.room.controller!, {
-        visualizePathStyle: { stroke: '#33cc55' },
-      });
-    }
-    this.label('Upgrade');
+  orderToUpgrade(): void {
+    this.memory = {
+      role: 'ghoul',
+    };
   }
 
   /**
-   * Moves to and withdraws resources from the provided container.
-   *
-   * @param container
+   * Sets the objective of this ghoul to withdraw or deposit.
    */
-  private runWithdrawGoal(
-    container: StructureSpawn | StructureContainer,
-  ): void {
-    const creep = this.object;
-    if (creep.withdraw(container, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-      creep.moveTo(container, {
-        visualizePathStyle: { stroke: '#cc4433' },
-      });
-    }
-    this.label('Withdraw');
+  orderToTransfer(container: StructureContainer | StructureSpawn): void {
+    this.memory = {
+      harvest: this.memory.harvest,
+      transfer: container.id,
+      role: 'ghoul',
+    };
   }
 
   /**
-   * Runs the Ghoul with a role of harvesting resources.
+   * Sets the objective of this ghoul to await further orders.
    */
-  private runHarvest(): void {
-    const creep = this.object;
-    const { memory } = this;
-    const container = this.findContainerWithCapacity(RESOURCE_ENERGY);
-
-    // Potentially switch tasks based on the current state.
-    if (this.hasFullCapacity(RESOURCE_ENERGY)) {
-      const empty = container?.store.getFreeCapacity(RESOURCE_ENERGY) === 0;
-      if (empty) {
-        memory.goal = 'upgrade';
-        creep.say('Upgrade');
-      } else {
-        memory.goal = 'deposit';
-        creep.say('Deposit');
-      }
-    } else if (this.hasEmptyCapacity(RESOURCE_ENERGY)) {
-      delete memory.goal;
-      creep.say('Harvest');
-    }
-
-    // Run task.
-    switch (memory.goal) {
-      case 'deposit':
-        if (!container) {
-          console.log(`"${creep.name}" lost the will to live (no containers)"`);
-          creep.suicide();
-          return;
-        }
-        return this.runDepositGoal(container);
-      case 'upgrade':
-        return this.runUpgradeGoal();
-      default:
-        return this.runHarvestGoal();
-    }
+  orderIdle(): void {
+    // TODO: Implement. For now we just keep our current orders/goals.
   }
 
-  private runDepositGoal(container: StructureContainer | StructureSpawn): void {
-    const creep = this.object;
-    if (creep.transfer(container, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-      creep.moveTo(container, {
-        visualizePathStyle: { stroke: '#cc4433' },
-      });
+  /**
+   * Runs code to actively harvest from a source and deposit in containers.
+   */
+  private runHarvest(from: Id<Source>): void {
+    if (this.memory.transfer) {
+      return this.runTransfer(this.memory.transfer);
     }
-    this.label('Deposit');
-  }
-
-  private runHarvestGoal(): void {
-    const creep = this.object;
-    const source = creep.room.find(FIND_SOURCES, {
-      filter: (s) => s.id === this.memory.harvest,
+    const { object } = this;
+    const source = object.room.find(FIND_SOURCES_ACTIVE, {
+      filter: (s) => s.id === from,
     })[0];
     if (!source) {
-      console.log(`"${creep.name}" lost the will to live (no sources)`);
-      creep.suicide();
+      this.orderIdle();
+    } else if (object.harvest(source) === ERR_NOT_IN_RANGE) {
+      object.moveTo(source.pos.x, source.pos.y);
+    }
+  }
+
+  /**
+   * Runs code to either withdraw or deposit into a structure.
+   *
+   * @param to Structure to withdraw or deposit to/from.
+   * @returns
+   */
+  private runTransfer(to: Id<Structure>): void {
+    const { object } = this;
+    const container = Game.structures[to];
+    if (!container) {
+      this.orderIdle();
       return;
     }
-    if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
-      creep.moveTo(source, { visualizePathStyle: { stroke: '#ffaa00' } });
+    if (this.memory.harvest) {
+      // Deposit.
+      if (object.transfer(container, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+        object.moveTo(container.pos.x, container.pos.y);
+      }
+    } else {
+      // Withdraw.
+      if (object.withdraw(container, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+        object.moveTo(container.pos.x, container.pos.y);
+      }
     }
-    this.label('Harvest');
+  }
+
+  /**
+   * Runs code to upgrade the room controller.
+   */
+  private runUpgrade(): void {
+    if (this.memory.transfer) {
+      return this.runTransfer(this.memory.transfer);
+    }
+    const { object } = this;
+    const { controller } = object.room;
+    if (!controller) {
+      this.orderIdle();
+      return;
+    }
+    if (object.upgradeController(controller) === ERR_NOT_IN_RANGE) {
+      object.moveTo(controller.pos.x, controller.pos.y);
+    }
   }
 }
