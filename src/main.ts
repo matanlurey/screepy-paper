@@ -1,5 +1,4 @@
-import lodash from 'lodash';
-import { Harvester } from './role.harvest.js';
+import ScreepyRoom from './room.js';
 
 export const loop = () => {
   // Garbage collection (non-existing creeps).
@@ -16,16 +15,5 @@ export const loop = () => {
   });
 
   // Spawn harvesters.
-  const spawner = lodash.sample(Object.values(Game.spawns));
-  if (spawner) {
-    const name = `Harvester 0x${Game.time.toString(16)}`;
-    spawner.spawnCreep([WORK, CARRY, MOVE], name, {
-      memory: Harvester.defaultMemory,
-    });
-  }
-
-  lodash
-    .filter(Object.values(Game.creeps), Harvester.isA)
-    .map((c) => new Harvester(c))
-    .forEach((c) => c.run());
+  Object.values(Game.rooms).forEach((r) => new ScreepyRoom(r).run());
 };
