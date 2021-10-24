@@ -85,70 +85,91 @@ export class Ghoul extends AbstractCreepScreepy<typeof role, GhoulMemory> {
     }
   }
 
+  /**
+   * Produces a small label describing the unit's current action.
+   *
+   * Should be the last command used.
+   *
+   * @param label
+   */
   protected override label(label?: string): void {
     super.label('Ghoul', label, '👻');
   }
 
+  /**
+   * Runs the Ghoul with a role of upgrading the room controller.
+   */
   private runUpgrade(): void {
     const creep = this.object;
-    if (creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0) {
+
+    // Potentially switch tasks based on current state.
+    if (this.hasFullCapacity(RESOURCE_ENERGY)) {
       creep.say('Upgrade');
       this.memory.goal = 'upgrade';
-    } else if (creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0) {
+    } else if (this.hasEmptyCapacity(RESOURCE_ENERGY)) {
       creep.say('Withdraw');
       delete this.memory.goal;
     }
+
+    // Run task.
     switch (this.memory.goal) {
       case 'upgrade':
-        if (
-          creep.transfer(creep.room.controller!, RESOURCE_ENERGY) ===
-          ERR_NOT_IN_RANGE
-        ) {
-          creep.moveTo(creep.room.controller!, {
-            visualizePathStyle: { stroke: '#33cc55' },
-          });
-        }
-        this.label('Upgrade');
-        break;
+        return this.runUpgradeGoal();
       default:
-        const containers = creep.room.find(FIND_STRUCTURES, {
-          filter: (s) => {
-            return (
-              s.structureType === 'spawn' || s.structureType === 'container'
-            );
-          },
-        }) as StructureContainer[] | StructureSpawn[];
-        containers.sort((a, b) => {
-          return (
-            a.store.getUsedCapacity(RESOURCE_ENERGY) -
-            b.store.getUsedCapacity(RESOURCE_ENERGY)
-          );
-        });
-        const container = containers[0];
+        const container = this.findContainerWithCapacity(RESOURCE_ENERGY);
         if (!container) {
           console.log(`"${creep.name}" lost the will to live (no containers)"`);
           creep.suicide();
           return;
         }
-        if (creep.withdraw(container, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(container, {
-            visualizePathStyle: { stroke: '#cc4433' },
-          });
-        }
-        this.label('Withdraw');
-        break;
+        return this.runWithdrawGoal(container);
     }
   }
 
+  /**
+   * Moves to and upgrades the room controller.
+   */
+  private runUpgradeGoal(): void {
+    const creep = this.object;
+    if (
+      creep.transfer(creep.room.controller!, RESOURCE_ENERGY) ===
+      ERR_NOT_IN_RANGE
+    ) {
+      creep.moveTo(creep.room.controller!, {
+        visualizePathStyle: { stroke: '#33cc55' },
+      });
+    }
+    this.label('Upgrade');
+  }
+
+  /**
+   * Moves to and withdraws resources from the provided container.
+   *
+   * @param container
+   */
+  private runWithdrawGoal(
+    container: StructureSpawn | StructureContainer,
+  ): void {
+    const creep = this.object;
+    if (creep.withdraw(container, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+      creep.moveTo(container, {
+        visualizePathStyle: { stroke: '#cc4433' },
+      });
+    }
+    this.label('Withdraw');
+  }
+
+  /**
+   * Runs the Ghoul with a role of harvesting resources.
+   */
   private runHarvest(): void {
     const creep = this.object;
     const { memory } = this;
-    const spawner = creep.room.find(FIND_STRUCTURES, {
-      filter: (s) => s.structureType === 'spawn',
-    })[0] as StructureSpawn | undefined;
+    const container = this.findContainerWithCapacity(RESOURCE_ENERGY);
 
-    if (creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0) {
-      const empty = spawner?.store.getFreeCapacity(RESOURCE_ENERGY) === 0;
+    // Potentially switch tasks based on the current state.
+    if (this.hasFullCapacity(RESOURCE_ENERGY)) {
+      const empty = container?.store.getFreeCapacity(RESOURCE_ENERGY) === 0;
       if (empty) {
         memory.goal = 'upgrade';
         creep.say('Upgrade');
@@ -156,40 +177,50 @@ export class Ghoul extends AbstractCreepScreepy<typeof role, GhoulMemory> {
         memory.goal = 'deposit';
         creep.say('Deposit');
       }
-    } else if (creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0) {
+    } else if (this.hasEmptyCapacity(RESOURCE_ENERGY)) {
       delete memory.goal;
       creep.say('Harvest');
     }
 
+    // Run task.
     switch (memory.goal) {
       case 'deposit':
-        if (!spawner) {
-          console.log(`"${creep.name}" lost the will to live (no spawners)"`);
+        if (!container) {
+          console.log(`"${creep.name}" lost the will to live (no containers)"`);
           creep.suicide();
           return;
         }
-        if (creep.transfer(spawner, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(spawner, { visualizePathStyle: { stroke: '#cc4433' } });
-        }
-        this.label('Deposit');
-        break;
+        return this.runDepositGoal(container);
       case 'upgrade':
-        this.runUpgrade();
-        break;
+        return this.runUpgradeGoal();
       default:
-        const source = creep.room.find(FIND_SOURCES, {
-          filter: (s) => s.id === memory.harvest,
-        })[0];
-        if (!source) {
-          console.log(`"${creep.name}" lost the will to live (no sources)`);
-          creep.suicide();
-          return;
-        }
-        if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
-          creep.moveTo(source, { visualizePathStyle: { stroke: '#ffaa00' } });
-        }
-        this.label('Harvest');
-        break;
+        return this.runHarvestGoal();
     }
+  }
+
+  private runDepositGoal(container: StructureContainer | StructureSpawn): void {
+    const creep = this.object;
+    if (creep.transfer(container, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+      creep.moveTo(container, {
+        visualizePathStyle: { stroke: '#cc4433' },
+      });
+    }
+    this.label('Deposit');
+  }
+
+  private runHarvestGoal(): void {
+    const creep = this.object;
+    const source = creep.room.find(FIND_SOURCES, {
+      filter: (s) => s.id === this.memory.harvest,
+    })[0];
+    if (!source) {
+      console.log(`"${creep.name}" lost the will to live (no sources)`);
+      creep.suicide();
+      return;
+    }
+    if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
+      creep.moveTo(source, { visualizePathStyle: { stroke: '#ffaa00' } });
+    }
+    this.label('Harvest');
   }
 }

@@ -78,6 +78,47 @@ export abstract class AbstractCreepScreepy<
     }
   }
 
+  /**
+   * Whether the creep has a completely full capacity of the provided resource.
+   * @param resource
+   * @returns
+   */
+  protected hasFullCapacity(resource: ResourceConstant): boolean {
+    return this.object.store.getFreeCapacity(resource) === 0;
+  }
+
+  /**
+   * Whether the creep has a completely empty capacity of the provided resource.
+   * @param resource
+   * @returns
+   */
+  protected hasEmptyCapacity(resource: ResourceConstant): boolean {
+    return this.object.store.getUsedCapacity(resource) === 0;
+  }
+
+  /**
+   * Returns a structure capable of housing the provided resource.
+   *
+   * @param resource
+   * @returns
+   */
+  protected findContainerWithCapacity(
+    resource: ResourceConstant,
+  ): StructureContainer | StructureSpawn | undefined {
+    const containers = this.object.room.find(FIND_STRUCTURES, {
+      filter: (s) => {
+        return s.structureType === 'spawn' || s.structureType === 'container';
+      },
+    }) as StructureContainer[] | StructureSpawn[];
+    containers.sort((a, b) => {
+      return (
+        a.store.getUsedCapacity(RESOURCE_ENERGY) -
+        b.store.getUsedCapacity(RESOURCE_ENERGY)
+      );
+    });
+    return containers[0];
+  }
+
   override toString(): string {
     return `${this.memory.role}|#${this.object.id}`;
   }
